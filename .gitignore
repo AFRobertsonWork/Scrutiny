@@ -1,0 +1,14 @@
+# ROS build folders
+build/
+install/
+log/
+
+# Python
+**/__pycache__/
+*.py[cod]
+
+# VS Code
+.vscode/
+
+# ZED SDK (official repository)
+src/zed-ros2-wrapper/
