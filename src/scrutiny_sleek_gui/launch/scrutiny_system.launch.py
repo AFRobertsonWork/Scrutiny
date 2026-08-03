@@ -25,6 +25,13 @@ def generate_launch_description():
         output="screen",
     )
 
+    measurement_node = Node(
+        package="scrutiny_measurement",
+        executable="fusion_node",
+        name="scrutiny_fusion_node",
+        output="screen",
+    )
+
     gui_node = Node(
         package="scrutiny_sleek_gui",
         executable="scrutiny_gui",
@@ -32,13 +39,15 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {"zed_left_topic": "/zed/zed_node/left/color/rect/image"},
-            {"zed_right_topic": "/zed/zed_node/right/color/rect/image"},
+            {"zed_depth_topic": "/zed/zed_node/depth/depth_registered"},
             {"tof_topic": "/scrutiny/tof/depth8"},
+            {"measurement_topic": "/scrutiny/measurement/fused_overlay"},
         ],
     )
 
     return LaunchDescription([
         zed_launch,
         tof_node,
+        measurement_node,
         gui_node,
     ])

@@ -26,11 +26,13 @@ from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QTextEdit,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -246,6 +248,7 @@ class Topics:
     zed_left: str
     zed_depth: str
     tof: str
+    measurement: str
 
 class ScrutinyGuiNode(Node):
     def __init__(self):
@@ -253,6 +256,7 @@ class ScrutinyGuiNode(Node):
         self.declare_parameter('zed_left_topic', '/zed/zed_node/left/color/rect/image')
         self.declare_parameter('zed_depth_topic', '/zed/zed_node/depth/depth_registered')
         self.declare_parameter('tof_topic', '/scrutiny/tof/depth8')
+        self.declare_parameter('measurement_topic', '/scrutiny/measurement/fused+overlay')
         self.declare_parameter('bag_dir', os.path.expanduser('~/bags'))
         self.declare_parameter('poweroff_command', 'systemctl poweroff')
         self.declare_parameter('zed_near_min_m', 0.25)
@@ -265,6 +269,7 @@ class ScrutinyGuiNode(Node):
             zed_left=self.get_parameter('zed_left_topic').value,
             zed_depth=self.get_parameter('zed_depth_topic').value,
             tof=self.get_parameter('tof_topic').value,
+            measurement=self.get_parameter('measurement_topic').value,
         )
         self.bag_dir = os.path.expanduser(self.get_parameter('bag_dir').value)
         self.poweroff_command = self.get_parameter('poweroff_command').value
@@ -299,12 +304,16 @@ class MainWindow(QMainWindow):
         self._left_frame = None
         self._depth_frame = None
         self._tof_frame = None
+        self._measurement_frame = None
         self._last_left_ts = 0.0
         self._last_depth_ts = 0.0
         self._last_tof_ts = 0.0
+        self._last_measurement_ts = 0.0
         self._left_seen = False
         self._depth_seen = False
         self._tof_seen = False
+        self._measurement_seen = False
+        self._operator_mode = True
         self._start_time = time.time()
         self._last_heartbeat_log = 0.0
         self._last_disk_state = 'unknown'
@@ -328,74 +337,119 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         root.setStyleSheet('background: #050505;')
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(8, 8, 8, 8)
-        outer.setSpacing(8)
+        outer.setContentsMargins(5, 5, 5, 5)
+        outer.setSpacing(5)
+
+        screen_width = QApplication.primaryScreen().availableGeometry().width()
+        compact = screen_width <= 1100
+
         header = QFrame()
+        header.setFixedHeight(72 if compact else 92)
         header.setStyleSheet("""
-            QFrame { background: #0d0d0d; border: 1px solid #232323; border-radius: 12px; }
+            QFrame { background: #0d0d0d; border: 1px solid #232323; border-radius: 9px; }
             QLabel { color: #eaeaea; }
         """)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 10, 12, 10)
-        header_layout.setSpacing(12)
+        header_layout.setContentsMargins(9, 6, 9, 6)
+        header_layout.setSpacing(8)
+
         title_wrap = QVBoxLayout()
-        title_wrap.setSpacing(2)
-        self.title_label = QLabel('Scrutiny Camera Dashboard')
-        self.title_label.setFont(QFont('Sans Serif', 16, QFont.Bold))
+        title_wrap.setSpacing(1)
+        self.title_label = QLabel('Scrutiny')
+        self.title_label.setFont(QFont('Sans Serif', 14 if compact else 16, QFont.Bold))
         self.system_state_label = QLabel('System: Starting')
-        self.system_state_label.setStyleSheet('color: #bdbdbd; font-size: 12px;')
+        self.system_state_label.setStyleSheet('color: #bdbdbd; font-size: 11px;')
         title_wrap.addWidget(self.title_label)
         title_wrap.addWidget(self.system_state_label)
-        info_wrap = QHBoxLayout()
-        info_wrap.setSpacing(14)
+
+        info_wrap = QVBoxLayout()
+        info_wrap.setSpacing(1)
         self.uptime_label = QLabel('Uptime: 00:00:00')
         self.disk_label = QLabel('Disk: --')
         self.record_target_label = QLabel('Bag: Idle')
         self.temp_label = QLabel('CPU: -- | GPU: --')
         self.error_label = QLabel('Last event: startup')
         for lbl in [self.uptime_label, self.disk_label, self.record_target_label, self.temp_label, self.error_label]:
-            lbl.setStyleSheet('color: #bdbdbd; font-size: 12px;')
-        info_wrap.addWidget(self.uptime_label)
+            lbl.setStyleSheet('color: #bdbdbd; font-size: 10px;')
         info_wrap.addWidget(self.disk_label)
-        info_wrap.addWidget(self.record_target_label)
         info_wrap.addWidget(self.temp_label)
-        info_wrap.addWidget(self.error_label)
+        if not compact:
+            info_wrap.addWidget(self.uptime_label)
+            info_wrap.addWidget(self.record_target_label)
+            info_wrap.addWidget(self.error_label)
+
         controls_wrap = QHBoxLayout()
-        controls_wrap.setSpacing(8)
+        controls_wrap.setSpacing(6)
         self.record_status_label = QLabel('Idle')
-        self.record_status_label.setStyleSheet('color: #cfcfcf; font-size: 12px;')
+        self.record_status_label.setStyleSheet('color: #cfcfcf; font-size: 11px;')
+        self.view_btn = QPushButton('Engineer')
+        self.view_btn.setFixedHeight(38)
+        self.view_btn.setMinimumWidth(92)
+        self.view_btn.clicked.connect(self.toggle_view)
+        self.view_btn.setStyleSheet("""
+            QPushButton { background: #176a9a; color: white; font-weight: bold; border: none; border-radius: 7px; padding: 0 10px; }
+            QPushButton:hover { background: #1c7caf; }
+        """)
         self.record_btn = QPushButton('Start Recording')
         self.record_btn.setFixedHeight(38)
-        self.record_btn.setMinimumWidth(150)
+        self.record_btn.setMinimumWidth(125 if compact else 150)
         self.record_btn.clicked.connect(self.toggle_recording)
         self.power_btn = QPushButton('Power Off')
         self.power_btn.setFixedHeight(38)
-        self.power_btn.setMinimumWidth(110)
+        self.power_btn.setMinimumWidth(90 if compact else 110)
         self.power_btn.clicked.connect(self.request_poweroff)
         self._set_record_button_idle()
         self._set_power_button_style()
-        controls_wrap.addWidget(self.record_status_label)
+        if not compact:
+            controls_wrap.addWidget(self.record_status_label)
+        controls_wrap.addWidget(self.view_btn)
         controls_wrap.addWidget(self.record_btn)
         controls_wrap.addWidget(self.power_btn)
-        header_layout.addLayout(title_wrap, 2)
-        header_layout.addLayout(info_wrap, 3)
+
+        header_layout.addLayout(title_wrap, 1)
+        header_layout.addLayout(info_wrap, 1)
         header_layout.addStretch(1)
         header_layout.addLayout(controls_wrap, 0)
         outer.addWidget(header, 0)
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
-        self.tof_panel = VideoPanel('ToF / Heatmap')
-        self.depth_panel = VideoPanel('ZED Depth Map')
-        top_row.addWidget(self.tof_panel, 1)
-        top_row.addWidget(self.depth_panel, 1)
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(8)
+
+        self.pages = QStackedWidget()
+        self.pages.setStyleSheet('background: #050505; border: none;')
+
+        operator_page = QWidget()
+        operator_layout = QVBoxLayout(operator_page)
+        operator_layout.setContentsMargins(0, 0, 0, 0)
+        operator_layout.setSpacing(0)
+        self.measurement_panel = VideoPanel('Operator View — RGB + Stencil + Measurement')
+        self.measurement_panel.title_label.setFont(QFont('Sans Serif', 11, QFont.Bold))
+        operator_layout.addWidget(self.measurement_panel, 1)
+
+        engineer_page = QWidget()
+        engineer_grid = QGridLayout(engineer_page)
+        engineer_grid.setContentsMargins(0, 0, 0, 0)
+        engineer_grid.setSpacing(5)
+        self.tof_panel = VideoPanel('ToF')
+        self.depth_panel = VideoPanel('ZED Depth')
         self.rgb_panel = VideoPanel('ZED RGB')
         self.log_panel = LogPanel('Runtime Log')
-        bottom_row.addWidget(self.rgb_panel, 2)
-        bottom_row.addWidget(self.log_panel, 3)
-        outer.addLayout(top_row, 3)
-        outer.addLayout(bottom_row, 2)
+        engineer_grid.addWidget(self.tof_panel, 0, 0)
+        engineer_grid.addWidget(self.depth_panel, 0, 1)
+        engineer_grid.addWidget(self.rgb_panel, 1, 0)
+        engineer_grid.addWidget(self.log_panel, 1, 1)
+        engineer_grid.setRowStretch(0, 1)
+        engineer_grid.setRowStretch(1, 1)
+        engineer_grid.setColumnStretch(0, 1)
+        engineer_grid.setColumnStretch(1, 1)
+
+        self.pages.addWidget(operator_page)
+        self.pages.addWidget(engineer_page)
+        self.pages.setCurrentIndex(0)
+        outer.addWidget(self.pages, 1)
+
+    def toggle_view(self):
+        self._operator_mode = not self._operator_mode
+        self.pages.setCurrentIndex(0 if self._operator_mode else 1)
+        self.view_btn.setText('Engineer' if self._operator_mode else 'Operator')
+        self.log('INFO', f"View -> {'Operator' if self._operator_mode else 'Engineer'}")
 
     def _set_record_button_idle(self):
         self.record_btn.setText('Start Recording')
@@ -434,6 +488,7 @@ class MainWindow(QMainWindow):
         self.log('INFO', f'Subscribed to ZED RGB   : {self.node.topics.zed_left}')
         self.log('INFO', f'Subscribed to ZED Depth : {self.node.topics.zed_depth}')
         self.log('INFO', f'Subscribed to ToF       : {self.node.topics.tof}')
+        self.log('INFO', f'Subscribed to Measurement: {self.node.topics.measurement}')
         self.log('INFO', f'Bag directory           : {self.node.bag_dir}')
         self.log('INFO', f'ZED near emphasis range : {self.node.zed_near_min_m:.2f} m to {self.node.zed_near_max_m:.2f} m')
 
@@ -441,6 +496,7 @@ class MainWindow(QMainWindow):
         self.sub_left = self.node.create_subscription(Image, self.node.topics.zed_left, self._cb_left, self.node.qos_cam)
         self.sub_depth = self.node.create_subscription(Image, self.node.topics.zed_depth, self._cb_depth, self.node.qos_cam)
         self.sub_tof = self.node.create_subscription(Image, self.node.topics.tof, self._cb_tof, self.node.qos_cam)
+        self.sub_measurement = self.node.create_subscription(Image, self.node.topics.measurement, self._cb_measurement, self.node.qos_cam)
 
     def _cb_left(self, msg: Image):
         try:
@@ -501,6 +557,16 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.log('ERROR', f'ToF decode failed: {e}')
 
+    def _cb_measurement(self, msg: Image):
+        try:
+            self._measurement_frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            self._last_measurement_ts = time.time()
+            if not self._measurement_seen:
+                self._measurement_seen = True
+                self.log('INFO', f'First measurement frame received ({msg.encoding})')
+        except Exception as e:
+            self.log('ERROR', f'Measurement image decode failed: {e}')
+
     def toggle_recording(self):
         if self._bag_proc and self._bag_proc.poll() is None:
             self.stop_recording()
@@ -510,7 +576,37 @@ class MainWindow(QMainWindow):
     def start_recording(self):
         os.makedirs(self.node.bag_dir, exist_ok=True)
         out_path = os.path.join(self.node.bag_dir, f"scrutiny_{time.strftime('%Y%m%d_%H%M%S')}")
-        cmd = ['ros2', 'bag', 'record', '-o', out_path, self.node.topics.zed_left, self.node.topics.zed_depth, self.node.topics.tof]
+        cmd = [
+            'ros2',
+            'bag',
+            'record',
+            '-o',
+            out_path,
+
+            # Raw sensor images
+            self.node.topics.zed_left,
+            self.node.topics.zed_depth,
+            '/scrutiny/tof/depth_raw',
+            '/scrutiny/tof/depth8',
+
+            # Processed measurement output
+            '/scrutiny/measurement/image',
+            '/scrutiny/object_diameter',
+            '/scrutiny/measurement_status',
+            '/scrutiny/measurement/fused_overlay',
+            '/scrutiny/measurement/diameter_mm',
+
+
+            # Camera calibration
+            '/zed/zed_node/left/color/rect/camera_info',
+            '/zed/zed_node/depth/depth_registered/camera_info',
+            '/scrutiny/tof/camera_info',
+
+            # Coordinate transforms
+            '/tf',
+            '/tf_static',
+        ]
+
         try:
             self._set_record_button_busy()
             self.log('ACTION', 'Starting rosbag recording')
@@ -596,8 +692,17 @@ class MainWindow(QMainWindow):
         self.depth_panel.set_status(self._stream_state(self._depth_seen, self._last_depth_ts, now), depth_age)
         self.tof_panel.set_status(self._tof_state, tof_age)
         self.log_panel.set_status('ok', 0.0)
+        measurement_age = now - self._last_measurement_ts if self._last_measurement_ts else None
+        self.measurement_panel.set_status(self._stream_state(self._measurement_seen, self._last_measurement_ts, now), measurement_age)
 
     def _refresh_images(self):
+        operator_frame = self._measurement_frame if self._measurement_frame is not None else self._left_frame
+        if operator_frame is not None:
+            pix = cv_to_pixmap(operator_frame)
+            if pix:
+                self.measurement_panel.set_pixmap(pix)
+        else:
+            self.measurement_panel.image_label.setText('Waiting for measurement/RGB frames')
         if self._tof_frame is not None:
             pix = cv_to_pixmap(self._tof_frame)
             if pix:

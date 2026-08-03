@@ -25,8 +25,8 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "measurement_node = "
-            "scrutiny_measurement.measurement_node:main",
+            "fusion_node = scrutiny_measurement.fusion_node:main",
         ],
     },
+
 )
