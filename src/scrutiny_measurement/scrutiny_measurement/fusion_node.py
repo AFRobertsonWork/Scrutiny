@@ -964,12 +964,12 @@ class FusionNode(Node):
                 output
             )
 
-            cv2.imshow(
-                "Scrutiny ZED Measurement",
-                output,
-            )
-
-            cv2.waitKey(1)
+            #cv2.imshow(
+            #    "Scrutiny ZED Measurement",
+            #    output,
+            #)
+            #
+            #cv2.waitKey(1)
             return
 
         result = self.segment_object()
