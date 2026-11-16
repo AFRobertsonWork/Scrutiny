@@ -291,8 +291,8 @@ This project makes use of
 
 # License
 
-Internal project.
+This project has an MIT license.
 
-Developed for the UK Agri-Tech Centre.
+Full authorship is attributed to Aditya Jadhav on behalf of UK Agri-Tech Centre, who remain the copyright holder.
 
-Distribution outside the organisation should follow UK Agri-Tech Centre policies.
+Note that this project depends on PyQt5 which is licensed under GNU GPL v3, which is not compatible with MIT, meaning the MIT licence only applies as long as source code for PyQt5 is not distributed with code in this project.
